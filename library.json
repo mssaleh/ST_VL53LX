@@ -1,0 +1,101 @@
+{
+  "name": "ST_VL53LX",
+  "version": "0.1.0",
+  "description": "STMicroelectronics VL53LX time-of-flight ranging sensor library for ESP-IDF framework. Supports multi-object detection, interrupt-based operation, and advanced calibration features for ESP32 and compatible platforms.",
+  "keywords": [
+    "sensor",
+    "time-of-flight",
+    "vl53lx",
+    "range",
+    "distance", 
+    "tof",
+    "esp32",
+    "espidf",
+    "i2c",
+    "multi-object",
+    "stmicroelectronics",
+    "ranging",
+    "laser",
+    "proximity",
+    "measurement",
+    "industrial",
+    "automation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mssaleh/ST_VL53LX"
+  },
+  "authors": [
+    {
+      "name": "Mohammed Saleh",
+      "url": "https://github.com/mssaleh",
+      "maintainer": true
+    },
+    {
+      "name": "STMicroelectronics",
+      "url": "https://www.st.com",
+      "maintainer": false
+    }
+  ],
+  "license": "GPL-2.0-or-later OR BSD-3-Clause",
+  "frameworks": ["espidf"],
+  "platforms": ["espressif32"],
+  "headers": "vl53lx_api.h",
+  "dependencies": [],
+  "export": {
+    "include": [
+      "include/**/*",
+      "src/**/*", 
+      "examples/**/*",
+      "docs/**/*",
+      "README.md",
+      "library.json",
+      "library.properties"
+    ],
+    "exclude": [
+      "docs/um2778-vl53lx-advanced.pdf"
+    ]
+  },
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src",
+    "flags": [
+      "-I include/vl53lx/core",
+      "-I include/vl53lx/platform"
+    ],
+    "srcFilter": [
+      "+<*>",
+      "+<vl53lx/core/>",
+      "+<vl53lx/platform/>"
+    ]
+  },
+  "examples": [
+    {
+      "name": "Basic Usage",
+      "base": "examples/basic_usage",
+      "files": [
+        "main.c",
+        "platformio.ini",
+        "README.md"
+      ]
+    },
+    {
+      "name": "Advanced Features", 
+      "base": "examples/advanced_features",
+      "files": [
+        "main.c",
+        "platformio.ini",
+        "README.md"
+      ]
+    },
+    {
+      "name": "Interrupt Based",
+      "base": "examples/interrupt_based", 
+      "files": [
+        "main.c",
+        "platformio.ini",
+        "README.md"
+      ]
+    }
+  ]
+}
