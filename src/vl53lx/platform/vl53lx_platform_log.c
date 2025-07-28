@@ -31,9 +31,9 @@
 static const char *TAG = "VL53LX";
 
 /* ESP-IDF doesn't require filename-based logging as logs go to console/UART */
-static uint32_t _trace_level     = VL53LX_TRACE_LEVEL_WARNING;
-static uint32_t _trace_modules   = VL53LX_TRACE_MODULE_NONE; 
-static uint32_t _trace_functions = VL53LX_TRACE_FUNCTION_ALL;
+uint32_t _trace_level     = VL53LX_TRACE_LEVEL_WARNING;
+uint32_t _trace_modules   = VL53LX_TRACE_MODULE_NONE; 
+uint32_t _trace_functions = VL53LX_TRACE_FUNCTION_ALL;
 
 /* Map VL53LX trace levels to ESP log levels. */
 static esp_log_level_t vl53lx_to_esp_log_level(uint32_t level)
@@ -93,7 +93,7 @@ void VL53LX_trace_print_module_function(uint32_t module, uint32_t level, uint32_
         char message[VL53LX_MAX_STRING_LENGTH];
         
         va_start(arg_list, format);
-        int ret = vsnprintf(message, VL53LX_MAX_STRING_LENGTH, format, arg_list);
+        vsnprintf(message, VL53LX_MAX_STRING_LENGTH, format, arg_list);
         va_end(arg_list);
         
         /* Ensure null termination in case of truncation */

@@ -19,7 +19,6 @@ extern "C" {
 
 /* Include platform definitions */
 #include "vl53lx/platform/vl53lx_platform.h"
-#include "vl53lx/platform/vl53lx_types.h"
 
 #ifdef __cplusplus
 }

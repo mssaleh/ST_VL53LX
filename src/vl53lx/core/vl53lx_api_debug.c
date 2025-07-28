@@ -290,9 +290,9 @@ void  VL53LX_signed_fixed_point_sprintf(
 
 
 	if (sign_bit > 0)
-		sprintf(fmt, "-%%u.%%0%uu", dec_points);
+		sprintf(fmt, "-%%u.%%0%luu", (unsigned long)dec_points);
 	else
-		sprintf(fmt,  "%%u.%%0%uu", dec_points);
+		sprintf(fmt,  "%%u.%%0%luu", (unsigned long)dec_points);
 
 
 	tmp_long_int  = (uint64_t)frac_part * (uint64_t)dec_scaler;
