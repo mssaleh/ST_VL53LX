@@ -1,6 +1,6 @@
 {
   "name": "ST_VL53LX",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "STMicroelectronics VL53LX time-of-flight ranging sensor library for ESP-IDF framework. Supports multi-object detection, interrupt-based operation, and advanced calibration features for ESP32 and compatible platforms.",
   "keywords": [
     "sensor",

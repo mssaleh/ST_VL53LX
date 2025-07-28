@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: GPL-2.0+ OR BSD-3-Clause
  */
 
-#ifndef _VL53LX_API_H_
-#define _VL53LX_API_H_
+#ifndef _VL53LX_API_WRAPPER_H_
+#define _VL53LX_API_WRAPPER_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,4 +25,4 @@ extern "C" {
 }
 #endif
 
-#endif /* _VL53LX_API_H_ */
+#endif /* _VL53LX_API_WRAPPER_H_ */
