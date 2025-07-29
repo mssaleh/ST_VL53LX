@@ -283,7 +283,7 @@ switch (range_status) {
 ### Problem: Header files not found
 **Symptoms:**
 ```
-fatal error: vl53lx_api.h: No such file or directory
+fatal error: vl53l3cx_api.h: No such file or directory
 ```
 
 **Solutions:**
@@ -295,7 +295,7 @@ fatal error: vl53lx_api.h: No such file or directory
 
 2. **Verify include paths:**
    ```c
-   #include "vl53lx_api.h"  // Correct
+   #include "vl53l3cx_api.h"  // Correct
    #include "vl53lx/core/vl53lx_api.h"  // Alternative if needed
    ```
 

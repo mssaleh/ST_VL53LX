@@ -16,7 +16,7 @@ This document provides an overview of the VL53LX library API for ESP-IDF project
 
 ### 1. Include the Library
 ```c
-#include "vl53lx_api.h"
+#include "vl53l3cx_api.h"
 ```
 
 ### 2. Initialize Device Structure
@@ -88,9 +88,18 @@ VL53LX_Error VL53LX_DataInit(VL53LX_Dev_t *pdev);
 
 **Important Notes:**
 - Must be called after `VL53LX_WaitDeviceBooted()`
-- If called multiple times, calibration data must be restored using `VL53LX_SetOffsetCalibrationData()`
+- **CRITICAL**: After DataInit, calibration data must be loaded and crosstalk compensation enabled:
+  ```c
+  VL53LX_SetCalibrationData(pdev, &calibration_data);
+  VL53LX_SetXTalkCompensationEnable(pdev, 1);  // REQUIRED!
+  ```
+- If called multiple times, calibration data must be restored
 - May return `VL53LX_ERROR_CALIBRATION_WARNING` if incorrect calibration data is detected
 - This function accesses the device via I2C
+
+**Timing Requirements:**
+- **Boot + SW Standby + Init**: Exactly 40ms (platform-independent)
+- **First Valid Measurement**: Available after 40ms + (2 × timing_budget)
 
 **Returns:** VL53LX_ERROR_NONE on success
 
@@ -211,6 +220,22 @@ VL53LX_Error VL53LX_GetMultiRangingData(
 );
 ```
 
+**⚠️ CRITICAL**: The very first measurement (Range1) **MUST be discarded** as it lacks wrap-around validation:
+
+```c
+static bool first_measurement = true;
+
+VL53LX_GetMultiRangingData(pdev, &data);
+
+if (first_measurement) {
+    // Always discard Range1 - no wrap-around check performed
+    first_measurement = false;
+    return; // Discard this measurement
+}
+
+// Process Range2 and subsequent measurements normally
+```
+
 ### VL53LX_ClearInterruptAndStartMeasurement()
 Clears the interrupt flag and starts the next measurement.
 
@@ -229,65 +254,145 @@ Performs reference SPAD management calibration.
 VL53LX_Error VL53LX_PerformRefSpadManagement(VL53LX_Dev_t *pdev);
 ```
 
+**⚠️ CRITICAL CALIBRATION STEP 1 of 3**
+
+**Setup Requirements:**
+- **No target** in front of sensor (uncovered)
+- Normal ambient conditions
+- Must be performed **FIRST** in calibration sequence
+
 **Important Notes:**
-- Should be performed once per device during manufacturing or first use
-- Requires no external target - can be performed with sensor uncovered
-- Results are automatically stored in device and used for subsequent measurements
-- Critical for optimal sensor performance and accuracy
+- **MANDATORY** for production - performed once during manufacturing
+- Optimizes the number of active Single Photon Avalanche Diodes (SPADs)
+- Results automatically stored in device structure
+- Essential for optimal sensor performance and accuracy
+
+**Warning Codes:**
+- `VL53LX_WARNING_REF_SPAD_CHAR_NOT_ENOUGH_SPADS`: <5 good SPADs available
+- `VL53LX_WARNING_REF_SPAD_CHAR_RATE_TOO_HIGH`: Rate >40 Mcps, offset stability degraded
+- `VL53LX_WARNING_REF_SPAD_CHAR_RATE_TOO_LOW`: Rate <10 Mcps, offset stability degraded
 
 ### VL53LX_PerformXTalkCalibration()
-Performs crosstalk calibration to compensate for internal reflections.
+Performs crosstalk calibration to compensate for cover glass reflections.
 
 ```c
-VL53LX_Error VL53LX_PerformXTalkCalibration(
-    VL53LX_Dev_t *pdev,
-    VL53LX_CalibrationData_t *pcalibration_data
-);
+VL53LX_Error VL53LX_PerformXTalkCalibration(VL53LX_Dev_t *pdev);
 ```
 
-**Procedure:**
-- Cover the sensor completely (no external light or targets)
-- Call this function to measure internal crosstalk
-- Store calibration data in non-volatile memory
-- Apply calibration data after each `VL53LX_DataInit()` call
+**⚠️ CRITICAL CALIBRATION STEP 2 of 3**
+
+**Setup Requirements:**
+- Target at exactly **600mm** distance
+- **Dark environment** (no IR interference)
+- Any target reflectance acceptable
+- Must be performed **AFTER** RefSPAD calibration
+
+**Critical Implementation:**
+```c
+// Perform crosstalk calibration
+VL53LX_PerformXTalkCalibration(&device);
+
+// Get and store calibration data
+VL53LX_CalibrationData_t cal_data;
+VL53LX_GetCalibrationData(&device, &cal_data);
+save_to_storage(&cal_data);
+
+// CRITICAL: Crosstalk compensation is DISABLED by default!
+// Must be explicitly enabled after loading calibration data:
+VL53LX_SetXTalkCompensationEnable(&device, 1);
+```
+
+**⚠️ WARNING**: Crosstalk compensation is **DISABLED by default** and must be explicitly enabled in production code!
 
 ### VL53LX_PerformOffsetCalibration()
 Performs offset calibration at a known distance.
 
+**⚠️ CRITICAL CALIBRATION STEP 3 of 3**
+
+**Two Available Methods:**
+
+#### Standard Offset Calibration
 ```c
-VL53LX_Error VL53LX_PerformOffsetCalibration(
+VL53LX_Error VL53LX_PerformOffsetSimpleCalibration(
     VL53LX_Dev_t *pdev,
-    int32_t cal_distance_mm,
-    VL53LX_CalibrationData_t *pcalibration_data
+    int32_t cal_distance_mm
 );
 ```
 
-**Procedure:**
-- Place a flat, matte white target at a known distance (e.g., 100mm)
-- Ensure target covers the entire sensor field of view
-- Call this function with the exact target distance
-- Store calibration data and apply after each `VL53LX_DataInit()`
-
-**Calibration Best Practices:**
+#### Per-VCSEL Calibration (Recommended)
 ```c
-// Typical calibration sequence during manufacturing
-VL53LX_CalibrationData_t cal_data;
+VL53LX_Error VL53LX_PerformOffsetPerVCSELCalibration(
+    VL53LX_Dev_t *pdev,
+    int32_t cal_distance_mm
+);
+```
 
-// 1. Reference SPAD management (uncovered sensor)
-VL53LX_PerformRefSpadManagement(dev);
+**Setup Requirements:**
+- Target at known distance (600mm recommended)
+- **Signal rate between 2-80 MCps** (CRITICAL REQUIREMENT)
+- Dark environment (no IR interference)
+- Must be performed **AFTER** RefSPAD and Crosstalk calibrations
 
-// 2. Crosstalk calibration (covered sensor)  
-VL53LX_PerformXTalkCalibration(dev, &cal_data);
+**MANDATORY Implementation:**
+```c
+// Choose calibration method
+VL53LX_PerformOffsetPerVCSELCalibration(&device, 600);
 
-// 3. Offset calibration (100mm white target)
-VL53LX_PerformOffsetCalibration(dev, 100, &cal_data);
+// MUST set offset correction mode to match calibration method
+VL53LX_SetOffsetCorrectionMode(&device, VL53LX_OFFSETCORRECTIONMODE_PERVCSEL);
 
-// 4. Store cal_data in non-volatile memory
+// If using simple calibration instead:
+// VL53LX_SetOffsetCorrectionMode(&device, VL53LX_OFFSETCORRECTIONMODE_STANDARD);
+```
 
-// 5. Apply calibration after each DataInit
-VL53LX_DataInit(dev);
-VL53LX_SetOffsetCalibrationData(dev, &cal_data);
-VL53LX_SetXTalkCalibrationData(dev, &cal_data);
+**Warning Codes:**
+- `VL53LX_WARNING_OFFSET_CAL_INSUFFICIENT_MM1_SPADS`: Signal too low
+- `VL53LX_WARNING_OFFSET_CAL_PRE_RANGE_RATE_TOO_HIGH`: Signal too high
+
+**Complete Production Calibration Sequence:**
+```c
+bool perform_factory_calibration(VL53LX_Dev_t *pdev) {
+    VL53LX_Error status;
+    
+    // STEP 1: RefSPAD Calibration (no target)
+    status = VL53LX_PerformRefSpadManagement(pdev);
+    if (status != VL53LX_ERROR_NONE) return false;
+    
+    // STEP 2: Crosstalk Calibration (600mm target, dark environment)
+    status = VL53LX_PerformXTalkCalibration(pdev);
+    if (status != VL53LX_ERROR_NONE) return false;
+    
+    // STEP 3: Offset Calibration (600mm target, 2-80 MCps signal)
+    status = VL53LX_PerformOffsetPerVCSELCalibration(pdev, 600);
+    if (status != VL53LX_ERROR_NONE) return false;
+    
+    // STEP 4: Set offset correction mode
+    VL53LX_SetOffsetCorrectionMode(pdev, VL53LX_OFFSETCORRECTIONMODE_PERVCSEL);
+    
+    // STEP 5: Save calibration data
+    VL53LX_CalibrationData_t cal_data;
+    VL53LX_GetCalibrationData(pdev, &cal_data);
+    save_calibration_to_storage(&cal_data);
+    
+    return true;
+}
+
+// Production startup sequence
+void production_sensor_init(VL53LX_Dev_t *pdev) {
+    VL53LX_WaitDeviceBooted(pdev);
+    VL53LX_DataInit(pdev);
+    
+    // Load and apply calibration
+    VL53LX_CalibrationData_t cal_data;
+    load_calibration_from_storage(&cal_data);
+    VL53LX_SetCalibrationData(pdev, &cal_data);
+    
+    // CRITICAL: Enable crosstalk compensation
+    VL53LX_SetXTalkCompensationEnable(pdev, 1);
+    
+    // Set offset correction mode
+    VL53LX_SetOffsetCorrectionMode(pdev, VL53LX_OFFSETCORRECTIONMODE_PERVCSEL);
+}
 ```
 
 ## Error Handling

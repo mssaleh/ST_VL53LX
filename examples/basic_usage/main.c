@@ -11,7 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "vl53lx_api.h"
+#include "vl53l3cx_api.h"
 
 static const char *TAG = "VL53LX_Basic";
 

@@ -23,7 +23,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "vl53lx_api.h"
+#include "vl53l3cx_api.h"
 
 static const char *TAG = "VL53LX_Interrupt";
 

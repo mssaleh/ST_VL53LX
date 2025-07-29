@@ -59,19 +59,39 @@ For full functionality including reset control, power management, and interrupt 
 ### I2C Pull-up Resistors
 The library enables ESP32 internal pull-up resistors by default. For longer I2C bus runs or multiple devices, external 4.7kΩ pull-up resistors to 3.3V may be required on SDA and SCL lines.
 
+## Critical Calibration Requirements
+
+**⚠️ IMPORTANT**: For optimal performance, the VL53LX sensor requires factory calibration to be performed **once** during production. The calibration must be done in this exact order:
+
+1. **RefSPAD Calibration** (no target required)
+2. **Crosstalk Calibration** (600mm target in dark environment) 
+3. **Offset Calibration** (known distance target)
+
+**CRITICAL**: Crosstalk compensation is **DISABLED by default** and must be explicitly enabled after loading calibration data:
+
+```c
+// After loading calibration data, MUST enable crosstalk compensation
+VL53LX_SetXTalkCompensationEnable(&device, 1);
+```
+
+See the [Factory Calibration](#factory-calibration) section below for complete procedures.
+
 ## Usage example
 
-The library exposes all functions provided by STMicroelectronics through the `vl53lx_api.h` header. A minimal example that initialises the sensor, starts a ranging measurement and reads the distance is shown below. Save this file under `src/main.c` in your PlatformIO project.
+The library exposes all functions provided by STMicroelectronics through the `vl53l3cx_api.h` header. A minimal example that initialises the sensor, starts a ranging measurement and reads the distance is shown below. Save this file under `src/main.c` in your PlatformIO project.
+
+**⚠️ NOTE**: This example assumes calibration has already been performed and stored. In production systems, you must load stored calibration data and enable crosstalk compensation.
 
 ```c
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "vl53lx_api.h"
+#include "vl53l3cx_api.h"
 
 static void vl53lx_task(void *arg)
 {
     VL53LX_Dev_t dev;
     VL53LX_DEV dev_handle = &dev;
+    bool first_measurement = true;
 
     /* Set up the I2C address used by your sensor (0x52 is the default when the
      * XSHUT pin is pulled high). */
@@ -144,6 +164,145 @@ VL53LX internal logging is integrated with ESP-IDF's logging system:
 ├── examples/               – Example projects demonstrating usage
 ├── library.json            – PlatformIO manifest
 └── README.md               – This document
+```
+
+## Factory Calibration
+
+**⚠️ MANDATORY FOR PRODUCTION**: The VL53LX sensor requires calibration to achieve optimal performance. This must be performed **once** during manufacturing.
+
+### Calibration Sequence (EXACT ORDER REQUIRED)
+
+```c
+// 1. RefSPAD Calibration (no external target required)
+VL53LX_Error status = VL53LX_PerformRefSpadManagement(&device);
+if (status != VL53LX_ERROR_NONE) {
+    // Handle calibration failure
+    return false;
+}
+
+// 2. Crosstalk Calibration (600mm target in dark environment)
+status = VL53LX_PerformXTalkCalibration(&device);
+if (status != VL53LX_ERROR_NONE) {
+    // Handle calibration failure
+    return false;
+}
+
+// 3. Offset Calibration (known distance target, 2-80 MCps signal rate)
+status = VL53LX_PerformOffsetPerVCSELCalibration(&device, 600); // 600mm target
+if (status != VL53LX_ERROR_NONE) {
+    // Handle calibration failure
+    return false;
+}
+
+// 4. Set offset correction mode to match calibration method
+VL53LX_SetOffsetCorrectionMode(&device, VL53LX_OFFSETCORRECTIONMODE_PERVCSEL);
+
+// 5. Save calibration data to non-volatile storage
+VL53LX_CalibrationData_t cal_data;
+VL53LX_GetCalibrationData(&device, &cal_data);
+save_calibration_to_storage(&cal_data);
+```
+
+### Critical Calibration Requirements
+
+#### RefSPAD Calibration
+- **Setup**: No target in front of sensor
+- **Environment**: Normal ambient conditions
+- **Purpose**: Optimize SPAD selection
+
+#### Crosstalk Calibration  
+- **Setup**: Target at exactly **600mm** distance
+- **Environment**: **Dark environment** (no IR interference)
+- **Target**: Any reflectance acceptable
+- **⚠️ CRITICAL**: After loading calibration data, crosstalk compensation **MUST** be enabled:
+  ```c
+  VL53LX_SetXTalkCompensationEnable(&device, 1);
+  ```
+
+#### Offset Calibration
+- **Setup**: Target at known distance (600mm recommended)
+- **Environment**: Dark environment
+- **Signal Rate**: **2-80 MCps** (CRITICAL REQUIREMENT)
+- **Method**: Use `VL53LX_PerformOffsetPerVCSELCalibration()` for best results
+
+### Startup Calibration Loading
+
+```c
+void load_and_apply_calibration(VL53LX_DEV device) {
+    VL53LX_CalibrationData_t cal_data;
+    
+    // Load calibration from storage
+    if (!load_calibration_from_storage(&cal_data)) {
+        printf("ERROR: No calibration data found!\n");
+        return;
+    }
+    
+    // Apply calibration data
+    VL53LX_SetCalibrationData(device, &cal_data);
+    
+    // CRITICAL: Enable crosstalk compensation
+    VL53LX_SetXTalkCompensationEnable(device, 1);
+    
+    // Set offset correction mode
+    VL53LX_SetOffsetCorrectionMode(device, VL53LX_OFFSETCORRECTIONMODE_PERVCSEL);
+}
+```
+
+### Field Calibration (Repair Shops)
+
+For devices where calibration data is lost:
+
+```c
+// Simplified zero-distance offset calibration
+// Place target (e.g., paper) directly touching cover glass
+VL53LX_PerformOffsetZeroDistanceCalibration(&device);
+```
+
+## Production Guidelines
+
+### Timing Requirements
+- **Boot + SW Standby + Init**: Exactly 40ms
+- **First Valid Measurement**: 40ms + (2 × timing_budget)
+- **Range1**: Must be discarded (no wrap-around check)
+- **Range2**: First usable measurement
+
+### Data Processing
+```c
+bool first_measurement = true;
+
+while (ranging_active) {
+    VL53LX_GetMultiRangingData(&device, &data);
+    
+    if (first_measurement) {
+        // CRITICAL: Always discard Range1
+        first_measurement = false;
+        continue;
+    }
+    
+    // Process valid data (Range2 onwards)
+    process_measurement_data(&data);
+}
+```
+
+### Error Handling
+```c
+VL53LX_Error status = VL53LX_GetMultiRangingData(&device, &data);
+if (status != VL53LX_ERROR_NONE) {
+    switch (status) {
+        case VL53LX_ERROR_TIME_OUT:
+            // Retry operation
+            break;
+        case VL53LX_ERROR_RANGE_ERROR:
+            // Check interrupt handling
+            break;
+        case VL53LX_ERROR_CALIBRATION_WARNING:
+            // Check/reload calibration data
+            break;
+        default:
+            // Handle other errors
+            break;
+    }
+}
 ```
 
 ## Licensing
