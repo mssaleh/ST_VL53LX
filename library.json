@@ -1,7 +1,7 @@
 {
   "name": "ST_VL53LX",
-  "version": "0.1.3",
-  "description": "STMicroelectronics VL53LX (such as VL53L3CX) time-of-flight ranging sensor library for ESP-IDF framework. Supports multi-object detection, interrupt-based operation, and advanced calibration features for ESP32 and compatible platforms.",
+  "version": "0.1.4",
+  "description": "STMicroelectronics VL53LX (such as VL53L3CX) time-of-flight ranging sensor library for ESP-IDF framework. Supports multi-object detection, interrupt-based operation, and advanced calibration for ESP32 platforms.",
   "keywords": [
     "sensor",
     "time-of-flight",
@@ -21,7 +21,7 @@
     "measurement",
     "industrial",
     "automation"
-  ],
+    ],
   "repository": {
     "type": "git",
     "url": "https://github.com/mssaleh/ST_VL53LX"
@@ -101,6 +101,15 @@
     {
       "name": "Production Calibration",
       "base": "examples/production_calibration", 
+      "files": [
+        "main.c",
+        "platformio.ini",
+        "README.md"
+      ]
+    },
+    {
+      "name": "Legacy I2C Driver",
+      "base": "examples/legacy_i2c", 
       "files": [
         "main.c",
         "platformio.ini",

@@ -2,18 +2,19 @@
 /*
  * Platform port layer for the ST VL53LX ranging sensor.
  *
- * This file provides an implementation of the low‑level communication
- * primitives required by the ST VL53LX driver.  The original ST
- * sources ship with empty stubs that must be filled in by the user.  The
- * implementation below targets the Espressif ESP32 family and relies
- * on the ESP‑IDF new I2C master driver.  It should work on other
- * ESP32 variants as well but may require adjustment of the I2C pin
- * assignments.
+ * This file provides an implementation of the low-level communication
+ * primitives required by the ST VL53LX driver. The original ST
+ * sources ship with empty stubs that must be filled in by the user. The
+ * implementation below targets the Espressif ESP32 family and supports
+ * both the new I2C master driver and the legacy I2C driver.
+ *
+ * Driver Selection:
+ * - Define VL53LX_USE_LEGACY_I2C to use the legacy I2C driver (driver/i2c.h)
+ * - Default behavior uses the new I2C master driver (driver/i2c_master.h)
  *
  * The goal of this port is to remain as close as possible to the
- * recommended usage demonstrated in the official ESP‑IDF I2C API
- * documentation.  See the “I2C master write” and “I2C master read”
- * examples in the ESP‑IDF guide for details【462041596841165†L425-L447】【462041596841165†L489-L523】.
+ * recommended usage demonstrated in the official ESP-IDF I2C API
+ * documentation for both driver versions.
  */
 
 #include <stdint.h>
@@ -22,29 +23,46 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2c_master.h"
 #include "esp_rom_sys.h"
+
+/* Driver selection based on build configuration */
+#ifdef VL53LX_USE_LEGACY_I2C
+    #include "driver/i2c.h"
+    #define VL53LX_I2C_DRIVER_LEGACY 1
+#else
+    #include "driver/i2c_master.h"
+    #define VL53LX_I2C_DRIVER_LEGACY 0
+#endif
 
 #include "vl53lx_platform.h"
 
 /*
- * The VL53LX driver stores the I2C address and bus configuration in the
- * VL53LX_Dev_t structure.  However, it does not provide storage for
- * platform‑specific handles such as the I2C bus or device handle.  We
- * therefore use static variables to keep track of the bus and device
- * handles created during initialisation.  This implementation assumes
- * that only one VL53LX device is attached to a single I2C bus.  If
- * multiple devices are used, it would be necessary to extend the
- * VL53LX_Dev_t structure to hold per‑device handles, or wrap the global
- * handles in a higher‑level context.
+ * Static variables for I2C communication handles.
+ * Different sets are used depending on the selected driver.
  */
-static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
-static i2c_master_dev_handle_t s_i2c_dev_handle = NULL;
+#if VL53LX_I2C_DRIVER_LEGACY
+    /* Legacy I2C driver - uses port number */
+    static bool s_i2c_initialized = false;
+#else
+    /* New I2C master driver - uses bus and device handles
+    * The VL53LX driver stores the I2C address and bus configuration in the
+    * VL53LX_Dev_t structure.  However, it does not provide storage for
+    * platform‑specific handles such as the I2C bus or device handle.  We
+    * therefore use static variables to keep track of the bus and device
+    * handles created during initialisation.  This implementation assumes
+    * that only one VL53LX device is attached to a single I2C bus.  If
+    * multiple devices are used, it would be necessary to extend the
+    * VL53LX_Dev_t structure to hold per‑device handles, or wrap the global
+    * handles in a higher‑level context.
+    */
+    static i2c_master_bus_handle_t s_i2c_bus_handle = NULL;
+    static i2c_master_dev_handle_t s_i2c_dev_handle = NULL;
+#endif
 
 /* Default I2C configuration
  *
- * ESP32 boards does not reserve fixed pins for I2C.
- * Instead, any free GPIOs may be used.  Users can override these
+ * ESP32 boards do not reserve fixed pins for I2C.
+ * Instead, any free GPIOs may be used. Users can override these
  * values by defining VL53LX_I2C_SDA and VL53LX_I2C_SCL in the
  * PlatformIO build flags (see README.md for details).
  */
@@ -61,10 +79,10 @@ static i2c_master_dev_handle_t s_i2c_dev_handle = NULL;
 #endif
 
 /*
- * Convert ESP‑IDF error codes into VL53LX error codes.
+ * Convert ESP-IDF error codes into VL53LX error codes.
  *
  * The ST driver uses negative error values with type VL53LX_Error
- * defined in vl53lx_error_codes.h.  We map ESP_OK to VL53LX_ERROR_NONE and
+ * defined in vl53lx_error_codes.h. We map ESP_OK to VL53LX_ERROR_NONE and
  * all other errors to VL53LX_ERROR_CONTROL_INTERFACE.
  */
 static inline VL53LX_Error esp_to_vl53lx_error(esp_err_t err)
@@ -80,7 +98,42 @@ VL53LX_Error VL53LX_CommsInitialise(
     /* Only I2C is supported by this implementation. */
     (void)comms_type;
 
-    /* If a bus has already been initialised, simply return success. */
+#if VL53LX_I2C_DRIVER_LEGACY
+    /* Legacy I2C driver implementation */
+    
+    /* If already initialized, return success */
+    if (s_i2c_initialized) {
+        return VL53LX_ERROR_NONE;
+    }
+
+    /* Configure I2C parameters */
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = VL53LX_I2C_SDA,
+        .scl_io_num = VL53LX_I2C_SCL,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = (uint32_t)comms_speed_khz * 1000U,
+        .clk_flags = 0,
+    };
+
+    esp_err_t ret = i2c_param_config(VL53LX_I2C_PORT, &conf);
+    if (ret != ESP_OK) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    ret = i2c_driver_install(VL53LX_I2C_PORT, conf.mode, 0, 0, 0);
+    if (ret != ESP_OK) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    s_i2c_initialized = true;
+    return VL53LX_ERROR_NONE;
+
+#else
+    /* New I2C master driver implementation */
+    
+    /* If a bus has already been initialized, simply return success. */
     if (s_i2c_dev_handle != NULL) {
         return VL53LX_ERROR_NONE;
     }
@@ -90,7 +143,7 @@ VL53LX_Error VL53LX_CommsInitialise(
      * external pull‑ups may not always be fitted on development
      * boards.  According to the ESP‑IDF docs, the bus must be
      * installed before devices can be attached.
-     */
+     */    
     i2c_master_bus_config_t bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = VL53LX_I2C_PORT,
@@ -123,6 +176,7 @@ VL53LX_Error VL53LX_CommsInitialise(
 
     ret = i2c_master_bus_add_device(s_i2c_bus_handle, &dev_cfg, &s_i2c_dev_handle);
     return esp_to_vl53lx_error(ret);
+#endif
 }
 
 VL53LX_Error VL53LX_CommsClose(
@@ -130,6 +184,16 @@ VL53LX_Error VL53LX_CommsClose(
 {
     (void)pdev;
     
+#if VL53LX_I2C_DRIVER_LEGACY
+    /* Legacy I2C driver cleanup */
+    if (s_i2c_initialized) {
+        i2c_driver_delete(VL53LX_I2C_PORT);
+        s_i2c_initialized = false;
+    }
+    return VL53LX_ERROR_NONE;
+
+#else
+    /* New I2C master driver cleanup */
     /* Clean up device handle first, then bus handle.
      * Ignore errors during cleanup to ensure both resources are freed.
      */
@@ -142,6 +206,7 @@ VL53LX_Error VL53LX_CommsClose(
         s_i2c_bus_handle = NULL;
     }
     return VL53LX_ERROR_NONE;
+#endif
 }
 
 VL53LX_Error VL53LX_WriteMulti(
@@ -150,8 +215,7 @@ VL53LX_Error VL53LX_WriteMulti(
     uint8_t      *pdata,
     uint32_t      count)
 {
-    (void)pdev;
-    if (!s_i2c_dev_handle || !pdata || count == 0) {
+    if (!pdata || count == 0) {
         return VL53LX_ERROR_CONTROL_INTERFACE;
     }
     /* Compose a buffer containing the 16‑bit register index followed by
@@ -164,7 +228,55 @@ VL53LX_Error VL53LX_WriteMulti(
     if (count > 1024) {  // Reasonable limit for sensor operations
         return VL53LX_ERROR_INVALID_PARAMS;
     }
+
+#if VL53LX_I2C_DRIVER_LEGACY
+    /* Legacy I2C driver implementation */
+    if (!s_i2c_initialized) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    /* Compose a buffer containing the 16-bit register index followed by
+     * the payload. The VL53LX register map uses big-endian addressing
+     * (MSB first).
+     */
+    uint8_t *buf = malloc(2 + count);
+    if (!buf) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
     
+    buf[0] = (uint8_t)(index >> 8);
+    buf[1] = (uint8_t)(index & 0xFF);
+    memcpy(&buf[2], pdata, count);
+
+    /* Create I2C command sequence */
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (!cmd) {
+        free(buf);
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    esp_err_t ret = ESP_OK;
+    ret |= i2c_master_start(cmd);
+    ret |= i2c_master_write_byte(cmd, pdev->i2c_slave_address | I2C_MASTER_WRITE, true);
+    ret |= i2c_master_write(cmd, buf, 2 + count, true);
+    ret |= i2c_master_stop(cmd);
+
+    if (ret == ESP_OK) {
+        ret = i2c_master_cmd_begin(VL53LX_I2C_PORT, cmd, pdMS_TO_TICKS(5000));
+    }
+
+    i2c_cmd_link_delete(cmd);
+    free(buf);
+    return esp_to_vl53lx_error(ret);
+
+#else
+    /* New I2C master driver implementation */
+    if (!s_i2c_dev_handle) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    /* Compose a buffer containing the 16-bit register index followed by
+     * the payload. */
     uint8_t *buf = malloc(2 + count);
     if (!buf) {
         return VL53LX_ERROR_CONTROL_INTERFACE;
@@ -182,6 +294,7 @@ VL53LX_Error VL53LX_WriteMulti(
     
     free(buf);
     return esp_to_vl53lx_error(ret);
+#endif
 }
 
 VL53LX_Error VL53LX_ReadMulti(
@@ -190,12 +303,56 @@ VL53LX_Error VL53LX_ReadMulti(
     uint8_t      *pdata,
     uint32_t      count)
 {
-    (void)pdev;
-    if (!s_i2c_dev_handle || !pdata || count == 0) {
+    if (!pdata || count == 0) {
         return VL53LX_ERROR_CONTROL_INTERFACE;
     }
-    /* Create a two‑byte buffer containing the register index. */
+
+#if VL53LX_I2C_DRIVER_LEGACY
+    /* Legacy I2C driver implementation */
+    if (!s_i2c_initialized) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    /* Create I2C command sequence for combined write/read transaction */
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (!cmd) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    esp_err_t ret = ESP_OK;
+    
+    /* Write register address */
+    ret |= i2c_master_start(cmd);
+    ret |= i2c_master_write_byte(cmd, pdev->i2c_slave_address | I2C_MASTER_WRITE, true);
+    ret |= i2c_master_write_byte(cmd, (uint8_t)(index >> 8), true);
+    ret |= i2c_master_write_byte(cmd, (uint8_t)(index & 0xFF), true);
+    
+    /* Read data */
+    ret |= i2c_master_start(cmd);  // Repeated start
+    ret |= i2c_master_write_byte(cmd, pdev->i2c_slave_address | I2C_MASTER_READ, true);
+    
+    if (count > 1) {
+        ret |= i2c_master_read(cmd, pdata, count - 1, I2C_MASTER_ACK);
+    }
+    ret |= i2c_master_read_byte(cmd, &pdata[count - 1], I2C_MASTER_NACK);
+    ret |= i2c_master_stop(cmd);
+
+    if (ret == ESP_OK) {
+        ret = i2c_master_cmd_begin(VL53LX_I2C_PORT, cmd, pdMS_TO_TICKS(5000));
+    }
+
+    i2c_cmd_link_delete(cmd);
+    return esp_to_vl53lx_error(ret);
+
+#else
+    /* New I2C master driver implementation */
+    if (!s_i2c_dev_handle) {
+        return VL53LX_ERROR_CONTROL_INTERFACE;
+    }
+
+    /* Create a two-byte buffer containing the register index. */
     uint8_t idx[2] = { (uint8_t)(index >> 8), (uint8_t)(index & 0xFF) };
+    
     /* Perform a combined write/read transaction.  According to the ESP‑IDF
      * documentation this function will send the index bytes and then read
      * the requested number of bytes from the device without releasing
@@ -206,9 +363,10 @@ VL53LX_Error VL53LX_ReadMulti(
                                                 pdata, count,
                                                 5000);
     return esp_to_vl53lx_error(ret);
+#endif
 }
 
-/* Single byte/word/dword helpers use the multi‑byte routines above. */
+/* Single byte/word/dword helpers use the multi-byte routines above. */
 
 VL53LX_Error VL53LX_WrByte(
     VL53LX_Dev_t *pdev,
@@ -308,7 +466,7 @@ VL53LX_Error VL53LX_WaitMs(
     if (wait_ms <= 0) {
         return VL53LX_ERROR_NONE;
     }
-    /* Convert milliseconds to FreeRTOS ticks and delay.  Add one tick
+    /* Convert milliseconds to FreeRTOS ticks and delay. Add one tick
      * to ensure at least the requested time has passed.
      */
     TickType_t ticks = pdMS_TO_TICKS(wait_ms);
@@ -318,8 +476,8 @@ VL53LX_Error VL53LX_WaitMs(
 
 /* Timer utility functions
  *
- * Provide current tick count in milliseconds.  Use esp_timer_get_time()
- * which returns microseconds since boot.  Convert to milliseconds.
+ * Provide current tick count in milliseconds. Use esp_timer_get_time()
+ * which returns microseconds since boot. Convert to milliseconds.
  */
 #include "esp_timer.h"
 
@@ -539,9 +697,9 @@ VL53LX_Error VL53LX_WaitValueMaskEx(
 {
     /*
      * Poll a register until a masked value matches the expected value or
-     * a timeout occurs.  This is used by the ST driver for various
-     * readiness checks.  We implement this using VL53LX_GetTickCount()
-     * and repeated reads.  A small delay is inserted between
+     * a timeout occurs. This is used by the ST driver for various
+     * readiness checks. We implement this using VL53LX_GetTickCount()
+     * and repeated reads. A small delay is inserted between
      * iterations to avoid saturating the bus.
      */
     uint32_t start_ms = 0;

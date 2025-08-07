@@ -1,12 +1,30 @@
-# ST VL53LX library for ESP‑IDF / PlatformIO
+# ST VL53LX library for ESP-I2. Optionally override the default I2C pins and select I2C driver by defining preprocessor macros in your `platformio.ini` under `build_flags`:
 
-This library packages STMicroelectronics’ official VL53LX time‑of‑flight (ToF) ranging API together with a small platform port layer for the ESP‑IDF framework. It allows developers to integrate the VL53LX sensor into ESP32 projects using PlatformIO. The underlying driver code is taken directly from the ST API and retains its original dual licence (GPL‑2.0 or BSD‑3‑Clause).
+   ```ini
+   build_flags =
+     -DVL53LX_I2C_SDA=8     ; I2C SDA pin (default: GPIO8)
+     -DVL53LX_I2C_SCL=9     ; I2C SCL pin (default: GPIO9)  
+     -DVL53LX_XSHUT_PIN=11  ; Reset pin (default: GPIO11)
+     -DVL53LX_INT_PIN=10    ; Interrupt pin (default: GPIO10)
+     -DVL53LX_PWR_PIN=12    ; Power control pin (default: GPIO12)
+     -DVL53LX_LOG_ENABLE    ; Enable VL53LX internal logging
+     -DVL53LX_USE_LEGACY_I2C ; Use legacy I2C driver instead of new I2C master driver
+   ```
+
+   **I2C Driver Selection:**
+   - **Default (recommended):** Uses the new ESP-IDF I2C master driver (`driver/i2c_master.h`) - available in ESP-IDF v5.0+
+   - **Legacy mode:** Define `-DVL53LX_USE_LEGACY_I2C` to use the legacy I2C driver (`driver/i2c.h`) for backward compatibility with older ESP-IDF versions
+
+   Replace `5` and `6` with the GPIO numbers connected to the sensor's SDA and SCL pins. By default the library uses GPIO 8 for SDA and GPIO 9 for SCL.IO
+
+This library packages STMicroelectronics' official VL53LX time-of-flight (ToF) ranging API together with a small platform port layer for the ESP-IDF framework. It allows developers to integrate the VL53LX sensor into ESP32 projects using PlatformIO. The underlying driver code is taken directly from the ST API and retains its original dual licence (GPL-2.0 or BSD-3-Clause).
 
 ## Features
 
-- **Full ST API:** All header and source files from the official ST VL53LX "BareDriver" are included. Only the low‑level platform stubs have been replaced with an implementation for ESP‑IDF.
-- **ESP‑IDF support:** Communication is implemented using the new ESP‑IDF I2C master driver. The code follows the examples provided in the ESP‑IDF programming guide for master write and read transactions.
-- **Non‑blocking delays:** Microsecond delays use `esp_rom_delay_us()`, while millisecond delays use FreeRTOS `vTaskDelay()`. The tick counter functions rely on `esp_timer_get_time()` for millisecond precision.
+- **Full ST API:** All header and source files from the official ST VL53LX "BareDriver" are included. Only the low-level platform stubs have been replaced with an implementation for ESP-IDF.
+- **Dual I2C Driver Support:** Compatible with both the new ESP-IDF I2C master driver (default) and the legacy I2C driver for backward compatibility.
+- **ESP-IDF support:** Communication is implemented using ESP-IDF I2C drivers following the examples provided in the ESP-IDF programming guide.
+- **Non-blocking delays:** Microsecond delays use `esp_rom_delay_us()`, while millisecond delays use FreeRTOS `vTaskDelay()`. The tick counter functions rely on `esp_timer_get_time()` for millisecond precision.
 - **Enhanced GPIO control:** Full implementation of GPIO functions for reset (XSHUT), power control, and interrupt handling using ESP32 GPIO API.
 - **ESP-IDF logging integration:** VL53LX internal logging is integrated with ESP-IDF's unified logging system for consistent log formatting and level control.
 - **Multi-object detection:** Supports advanced features like multi-object detection, various distance modes, and customizable ROI (Region of Interest).
@@ -152,6 +170,53 @@ VL53LX internal logging is integrated with ESP-IDF's logging system:
 - **basic_usage**: Simple distance measurement
 - **advanced_features**: Multi-object detection, GPIO control, device information
 - **interrupt_based**: Efficient interrupt-driven measurements with FreeRTOS integration
+- **legacy_i2c**: Demonstrates backward compatibility using the legacy I2C driver
+
+## I2C Driver Support
+
+This library supports both ESP-IDF I2C driver implementations:
+
+### New I2C Master Driver (Default)
+- **Header:** `driver/i2c_master.h`
+- **ESP-IDF Version:** v5.0+
+- **Features:** Enhanced error handling, better performance, handle-based API
+- **Usage:** Default behavior, no additional configuration needed
+
+### Legacy I2C Driver (Backward Compatibility)  
+- **Header:** `driver/i2c.h`
+- **ESP-IDF Version:** All versions
+- **Features:** Command-based API, lower memory usage
+- **Usage:** Define `-DVL53LX_USE_LEGACY_I2C` in build flags
+
+### Driver Selection Example
+
+**New I2C Master Driver (default):**
+```ini
+build_flags =
+    -DVL53LX_I2C_SDA=8
+    -DVL53LX_I2C_SCL=9
+```
+
+**Legacy I2C Driver:**
+```ini
+build_flags =
+    -DVL53LX_USE_LEGACY_I2C    ; Enable legacy driver
+    -DVL53LX_I2C_SDA=8
+    -DVL53LX_I2C_SCL=9
+```
+
+The VL53LX API usage remains identical regardless of the selected I2C driver - only the underlying communication implementation changes.
+
+### I2C Driver Comparison
+
+| Feature | Legacy I2C Driver | New I2C Master Driver |
+|---------|-------------------|----------------------|
+| ESP-IDF Version | All versions | v5.0+ |
+| API Style | Command-based | Handle-based |
+| Performance | Good | Better |
+| Memory Usage | Lower | Higher |
+| Error Handling | Basic | Enhanced |
+| Address Format | 8-bit (with R/W bit) | 7-bit (clean address) |
 
 ## Directory structure
 
@@ -259,6 +324,23 @@ VL53LX_PerformOffsetZeroDistanceCalibration(&device);
 ```
 
 ## Production Guidelines
+
+### Compatibility and Migration
+
+**Existing Projects:** If you have an existing project using this library, it will continue to work without changes. The new dual-driver support is backward compatible.
+
+**Migration Options:**
+- **Stay with new driver (recommended):** No changes needed for ESP-IDF v5.0+
+- **Switch to legacy driver:** Add `-DVL53LX_USE_LEGACY_I2C` to build flags
+- **Mixed environments:** Use build configurations to switch drivers per deployment
+
+### ESP-IDF Version Compatibility
+
+| ESP-IDF Version | New I2C Master Driver | Legacy I2C Driver |
+|-----------------|----------------------|------------------|
+| v5.0+ | ✅ Recommended | ✅ Supported |
+| v4.4 - v4.x | ❌ Not available | ✅ Use legacy |
+| v4.3 and earlier | ❌ Not available | ✅ Use legacy |
 
 ### Timing Requirements
 - **Boot + SW Standby + Init**: Exactly 40ms
